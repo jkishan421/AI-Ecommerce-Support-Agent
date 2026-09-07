@@ -61,7 +61,7 @@ os.environ["BYPASS_TOOL_CONSENT"] = "true"
 # MEMORY_ID   format: shown in the AgentCore Memory console
 
 GATEWAY_URL = "https://customersupportgateway-qwnv0g5wfe.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
-KB_ID = "MQ7IHJLR6N"
+KB_ID = "GZCGNUA71X"
 REGION = "us-east-1"
 MEMORY_ID = "CustomerSupportMemory-4jdLNb2CTD"
 
@@ -324,17 +324,27 @@ def search_knowledge_base(query: str) -> str:
     Returns:
         Relevant information retrieved from the knowledge base
     """
-    resp = _bedrock_runtime.retrieve(
-        knowledgeBaseId=KB_ID,
-        retrievalQuery={"text": query},
-    )
-    results = resp.get("retrievalResults", [])
-    if not results:
-        return f"No information found for: {query}"
 
-    chunks = [r["content"]["text"] for r in results]
-    return "\n---\n".join(chunks)
+    if not KB_ID or not KB_ID.strip():
+        return (
+            "Knowledge Base is not configured: KB_ID is empty or missing. "
+            "Please configure KB_ID before attempting a knowledge-base search."
+        )
 
+    try:
+        resp = _bedrock_runtime.retrieve(
+            knowledgeBaseId=KB_ID,
+            retrievalQuery={"text": query},
+        )
+        results = resp.get("retrievalResults", [])
+        if not results:
+            return f"No information found for: {query}"
+
+        chunks = [r["content"]["text"] for r in results]
+        return "\n---\n".join(chunks)
+
+    except Exception as e:
+        logger.error("Failed to retrieve knowledge base: %s", e)
 
 # ── TODO 7 — Loyalty Discount Tool (Code Interpreter) ────────────────────────
 # Implement calculate_loyalty_discount() using the @tool decorator.
@@ -525,8 +535,25 @@ async def invoke(payload, context=None):
         lambda : streamable_http_client(url=GATEWAY_URL)
     )
     with client:
-        gateway_tools = client.list_tools_sync()
-        tools.extend(gateway_tools)
+        try:
+            gateway_tools = client.list_tools_sync()
+            tools.extend(gateway_tools)
+
+            logger.info(
+                "Gateway connected successfully. Loaded %d tools.",
+                len(gateway_tools),
+            )
+
+        except TimeoutError:
+            logger.exception("Gateway tool loading timed out")
+
+        except ConnectionError:
+            logger.exception("Gateway connection failed")
+
+        except Exception as exc:
+            logger.exception(
+                "Gateway tool loading failed: %s", exc
+            )
 
         agent = Agent(
             model=model,
